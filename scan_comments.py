@@ -5,6 +5,7 @@ import time
 import base64
 import logging
 import requests
+import re
 from typing import Dict, List, Optional
 from urllib.parse import urlparse
 
@@ -15,6 +16,8 @@ if not YOUTUBE_API_KEY:
 
 # --- Endpoints ---
 YT_SEARCH_URL = "https://www.googleapis.com/youtube/v3/search"
+YT_COMMENTS_URL = "https://www.googleapis.com/youtube/v3/commentThreads"
+
 
 # --- Prompt for Gemini ---
 PROMPT = (
@@ -24,6 +27,71 @@ PROMPT = (
 # --- Logging ---
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 log = logging.getLogger("yt_thumbs_gemini")
+
+
+SCANWORDS: Dict[str, Set[str]] = {
+    # English
+    "en": {
+        # wildlife terms
+        "pangolin", "ivory", "rhino horn", "tiger skin", "wildlife trade",
+        # commerce / contact cues
+        "price", "rate", "deal", "for sale", "sell", "selling", "buy", "buying",
+        "available", "in stock", "stock",
+        "call me", "call", "contact", "phone", "number",
+        "dm", "pm", "inbox", "message", "msg",
+        "whatsapp", "whats app", "watsapp", "whtsapp", "wa", "wa no", "whatsapp me",
+        # common misspellings/short forms
+        "whatsap", "watsap", "whatsp",
+    },
+
+    # Hindi
+    "hi": {
+        # wildlife terms (add more if you like)
+        "पैंगोलिन", "हाथीदांत", "गैंडे का सींग", "बाघ की खाल", "वन्यजीव व्यापार",
+        # commerce / contact cues
+        "कीमत", "दाम", "रेट", "डील",
+        "कॉल करो", "मुझे कॉल करो", "कॉल करें", "कॉल",
+        "संपर्क", "नंबर", "फोन",
+        "डीएम", "डायरेक्ट मैसेज", "मैसेज", "संदेश", "इनबॉक्स",
+        "व्हाट्सएप", "वॉट्सऐप", "व्हाट्सअप",
+        # people often use Latin spellings in Hindi comments too:
+        "whatsapp", "watsapp", "wa", "wa no",
+    },
+
+    # Marathi
+    "mr": {
+        # wildlife terms
+        "खवले मांजर", "हत्तीचे दात", "गेंड्याचे शिंग", "वाघाची कातडी", "वन्यजीव व्यापार",
+        # commerce / contact cues
+        "किंमत", "भाव", "रेट", "डील",
+        "कॉल करा", "मला कॉल करा", "कॉल", "फोन", "नंबर", "संपर्क",
+        "मेसेज", "संदेश", "डीएम", "डायरेक्ट मेसेज", "इनबॉक्स",
+        "व्हॉट्सअ‍ॅप", "वॉट्सॅप",
+        # common Latin forms used in MR contexts
+        "whatsapp", "watsapp", "wa", "wa no",
+    },
+
+    # Telugu
+    "te": {
+        # wildlife terms
+        "ప్యాంగోలిన్", "దంతం", "ఖడ్గమృగం కొమ్ము", "పులి చర్మం", "అడవి జంతు వాణిజ్యం",
+        # commerce / contact cues
+        "ధర", "రేటు", "డీల్",
+        "కాల్ చేయి", "నన్ను కాల్ చేయి", "కాల్చేయి", "ఫోన్", "నెంబర్",
+        "డీఎం", "మెసేజ్", "సందేశం", "ఇన్‌బాక్స్",
+        "వాట్సాప్", "వాట్సాప్ నంబర్",
+        # Latin spellings seen in TE comments
+        "whatsapp", "watsapp", "wa", "wa no",
+    },
+}
+
+
+# Regex to match Indian mobile numbers, allowing special characters between
+# digits (e.g. 7@8#6*6&6*9%6(5#8#8).
+INDIAN_MOBILE_REGEX = re.compile(
+    r"(?:\+?91[\D]*)?([6-9](?:[\D]*\d){9})"
+)
+
 
 # -------------------- Helpers --------------------
 def _get(url: str, params: Dict, max_retries: int = 5, backoff: float = 1.7) -> Dict:
@@ -113,6 +181,49 @@ def normalize_yes_no(s: str) -> str:
     if s.startswith("n"): return "no"
     return "no"
 
+def fetch_comments(video_id: str, max_results: int = 50) -> List[Dict]:
+    """Fetch up to max_results top-level comments for a video."""
+    items: List[Dict] = []
+    page_token: Optional[str] = None
+    while len(items) < max_results:
+        to_fetch = min(100, max_results - len(items))
+        params = {
+            "key": YOUTUBE_API_KEY,
+            "part": "snippet",
+            "videoId": video_id,
+            "maxResults": to_fetch,
+            "textFormat": "plainText",
+        }
+        if page_token:
+            params["pageToken"] = page_token
+        data = _get(YT_COMMENTS_URL, params)
+        page_items = data.get("items", [])
+        items.extend(page_items)
+        page_token = data.get("nextPageToken")
+        if not page_token or not page_items:
+            break
+
+    comments: List[Dict] = []
+    for it in items:
+        sn = (((it.get("snippet") or {}).get("topLevelComment") or {}).get("snippet")) or {}
+        comments.append({
+            "comment_id": it.get("id", ""),
+            "author": sn.get("authorDisplayName", ""),
+            "text": sn.get("textDisplay", ""),
+        })
+    return comments
+
+
+def scan_comment(text: str, lang: str) -> Optional[Dict[str, List[str]]]:
+    """Return matched words and phone numbers in a comment."""
+    words = SCANWORDS.get(lang, set())
+    lower_text = text.lower()
+    matched_words = [w for w in words if w.lower() in lower_text]
+    numbers = [re.sub(r"\D", "", m) for m in INDIAN_MOBILE_REGEX.findall(text)]
+    if matched_words or numbers:
+        return {"words": matched_words, "numbers": numbers}
+    return None
+
 # -------------------- Main --------------------
 def main():
     import argparse
@@ -129,6 +240,23 @@ def main():
     # Optional Gemini config (only needed when analyze_thumbnails=true)
     ap.add_argument("--gemini_model", default= "gemini-1.5-pro-latest")
     ap.add_argument("--gemini_api_key", default="AIzaSyA2BwX7quE1Mf0_eA4KmVOFqeq0rd_F5So")
+    ap.add_argument(
+        "--language",
+        choices=["hi", "en", "mr"],
+        default="en",
+        help="Language for comment scanwords (hi=en for Telugu per requirement)",
+    )
+    ap.add_argument(
+        "--max_comments",
+        type=int,
+        default=50,
+        help="Max comments to fetch per video",
+    )
+    ap.add_argument(
+        "--comment_csv",
+        default="yt_comment_hits.csv",
+        help="Output CSV filename for comment hits",
+    )
     args = ap.parse_args()
 
     do_hits = (args.analyze_thumbnails == "true")
@@ -153,7 +281,10 @@ def main():
 
     log.info(f"Found {len(videos)} videos. Thumbnail analysis: {'ON' if do_hits else 'OFF'}")
 
-    results = []
+    results: List[Dict] = []
+    comment_hits: List[Dict] = []
+
+
     yes_hits = 0
 
     for i, v in enumerate(videos, 1):
@@ -193,6 +324,24 @@ def main():
             "hit": hit,
         })
 
+        # Fetch and scan comments
+        try:
+            comments = fetch_comments(vid, max_results=args.max_comments)
+            for c in comments:
+                scan_res = scan_comment(c["text"], args.language)
+                if scan_res:
+                    comment_hits.append({
+                        "video_id": vid,
+                        "video_title": v["title"],
+                        "comment_id": c["comment_id"],
+                        "author": c["author"],
+                        "text": c["text"],
+                        "matched_words": ",".join(scan_res["words"]),
+                        "phone_numbers": ",".join(scan_res["numbers"]),
+                    })
+        except Exception as e:
+            log.info(f"  ! Error fetching comments: {e}")
+
         if do_hits:
             time.sleep(args.sleep)
 
@@ -205,6 +354,25 @@ def main():
         w = csv.DictWriter(f, fieldnames=fieldnames)
         w.writeheader()
         w.writerows(results)
+
+    if comment_hits:
+        comment_fields = [
+            "video_id",
+            "video_title",
+            "comment_id",
+            "author",
+            "text",
+            "matched_words",
+            "phone_numbers",
+        ]
+        with open(args.comment_csv, "w", newline="", encoding="utf-8") as f:
+            w = csv.DictWriter(f, fieldnames=comment_fields)
+            w.writeheader()
+            w.writerows(comment_hits)
+        log.info(f"Saved {len(comment_hits)} comment hit(s) to {args.comment_csv}")
+    else:
+        log.info("No comment hits found.")
+
 
     log.info(f"\nDone. {yes_hits} hit(s) saved to {args.csv} (thumbnail analysis: {'ON' if do_hits else 'OFF'})")
 
