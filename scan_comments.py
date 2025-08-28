@@ -227,9 +227,9 @@ def main():
                     "matched_keywords": ", ".join(kws)
                 })
         if any_hit:
-            print("  -> Matches found in comments.")
+            log.info("  -> Matches found in comments.")
         else:
-            print("  -> No matches in comments.")
+            log.info("  -> No matches in comments.")
 
     # Write CSV
     fieldnames = [
@@ -241,7 +241,7 @@ def main():
         writer.writeheader()
         writer.writerows(hits)
 
-    print(f"\nDone. {len(hits)} hit(s) saved to {args.csv}")
+    log.info(f"\nDone. {len(hits)} hit(s) saved to {args.csv}")
 
 if __name__ == "__main__":
     main()
