@@ -6,7 +6,7 @@ import zipfile
 from flask import Flask, render_template, request, send_file, abort
 
 app = Flask(__name__)
-scan_progress = {"percent": 0}
+scan_logs: list[str] = []
 
 # Safety: keep your API key in the environment
 # export YOUTUBE_API_KEY="your-key"  (Linux/Mac)
@@ -19,9 +19,9 @@ def home():
     return render_template("index.html")
 
 
-@app.get("/progress")
-def progress():
-    return scan_progress
+@app.get("/logs")
+def logs():
+    return {"lines": scan_logs}
 
 
 @app.post("/scan")
@@ -30,6 +30,7 @@ def scan():
     max_results = request.form.get("max_results", "50").strip()
     max_comment_pages = request.form.get("max_comment_pages", "10").strip()
     keywords = (request.form.get("keywords") or "whatsapp, contact, call me, price, for sale, ivory, horn").strip()
+    language = (request.form.get("language") or "en").strip()
 
     if not keyword:
         abort(400, "keyword is required")
@@ -46,12 +47,11 @@ def scan():
         "--max_results", max_results,
         "--max_comment_pages", max_comment_pages,
         "--csv", csv_path,
-        "--log", log_path,
         "--keywords", keywords,
+        "--language", language,
     ]
 
-    progress_re = re.compile(r"\[(\d+)/(\d+)\]")
-    scan_progress["percent"] = 0
+   scan_logs.clear()
 
     try:
          proc = subprocess.Popen(
@@ -62,12 +62,10 @@ def scan():
             bufsize=1,
         )
 
-        for line in proc.stdout:
-            m = progress_re.search(line)
-            if m:
-                idx, total = int(m.group(1)), int(m.group(2))
-                if total:
-                    scan_progress["percent"] = int(idx / total * 100)
+       with open(log_path, "w") as log_file:
+            for line in proc.stdout:
+                scan_logs.append(line)
+                log_file.write(line)
 
         proc.wait(timeout=1200)
         if proc.returncode != 0:
@@ -82,8 +80,7 @@ def scan():
     except subprocess.TimeoutExpired:
         proc.kill()
         abort(504, "Scan timed out. Try fewer results or fewer comment pages.")
-    finally:
-        scan_progress["percent"] = 100
+   
 
     # Package CSV and log into a zip for download
     fd_zip, zip_path = tempfile.mkstemp(prefix="yt_", suffix=".zip")
