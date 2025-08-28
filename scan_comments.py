@@ -249,7 +249,7 @@ def main():
     ap.add_argument(
         "--max_comments",
         type=int,
-        default=50,
+        default=200,
         help="Max comments to fetch per video",
     )
     ap.add_argument(
