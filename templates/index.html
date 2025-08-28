@@ -15,7 +15,7 @@
             Enter a keyword and how many videos to scan. On submit, the server runs the Python script and returns a CSV.
         </p>
 
-        <form action="/scan" method="POST" class="grid gap-4">
+       <form id="scan-form" class="grid gap-4">
             <div>
                 <label class="block text-sm font-medium mb-1">Keyword</label>
                 <input name="keyword" required placeholder="e.g., wildlife trade"
@@ -47,11 +47,60 @@
                 Scan & Download CSV
             </button>
 
+            <div id="progress-container" class="hidden">
+                <div class="w-full bg-slate-200 rounded-full h-4">
+                    <div id="progress-bar" class="bg-indigo-600 h-4 rounded-full" style="width:0%"></div>
+                </div>
+                <p id="progress-text" class="text-xs mt-1">0%</p>
+            </div>
+
+
             <p class="text-xs text-slate-500">
                 Tip: Keep it small for a demo (e.g., 10–30 videos). Requires <code>YOUTUBE_API_KEY</code> in the server environment.
             </p>
         </form>
     </div>
 </main>
+    <script>
+const form = document.getElementById('scan-form');
+const progressContainer = document.getElementById('progress-container');
+const progressBar = document.getElementById('progress-bar');
+const progressText = document.getElementById('progress-text');
+let progressInterval;
+
+form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const fd = new FormData(form);
+    progressContainer.classList.remove('hidden');
+    progressBar.style.width = '0%';
+    progressText.textContent = '0%';
+
+    progressInterval = setInterval(async () => {
+        const r = await fetch('/progress');
+        const data = await r.json();
+        progressBar.style.width = data.percent + '%';
+        progressText.textContent = data.percent + '%';
+    }, 1000);
+
+    const resp = await fetch('/scan', { method: 'POST', body: fd });
+    clearInterval(progressInterval);
+    progressBar.style.width = '100%';
+    progressText.textContent = '100%';
+
+    if (resp.ok) {
+        const blob = await resp.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'yt_scan_results.csv';
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+    } else {
+        alert('Scan failed');
+    }
+});
+</script>
 </body>
 </html>
