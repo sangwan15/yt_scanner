@@ -211,19 +211,21 @@ def fetch_comments(video_id: str, max_results: int = 50) -> List[Dict]:
     return comments
 
 def comments_enabled(video_id: str) -> bool:
-    """Return True if comments are enabled for the given video."""
+    """True iff commentThreads endpoint is accessible for this video."""
     params = {
         "key": YOUTUBE_API_KEY,
-        "part": "statistics",
-        "id": video_id,
+        "part": "snippet",
+        "videoId": video_id,
+        "maxResults": 1,
+        "textFormat": "plainText",
+        "order": "time",
     }
-    data = _get(YT_VIDEOS_URL, params)
-    items = data.get("items", [])
-    if not items:
+    try:
+        _ = _get(YT_COMMENTS_URL, params)  # if it’s 200, comments are enabled (even if 0 comments)
+        return True
+    except CommentsDisabledError:
         return False
-    stats = items[0].get("statistics", {}) or {}
-    # commentCount may be absent when comments are disabled
-    return "commentCount" in stats
+
 
 
 def scan_comment(text: str, lang: str) -> Optional[Dict[str, List[str]]]:
