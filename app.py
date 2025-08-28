@@ -41,7 +41,7 @@ def scan():
     os.close(fd_log)
 
     cmd = [
-        "python", "scan_comments.py",
+        "python", "-u", "scan_comments.py",
         keyword,
         "--max_results", max_results,
         "--max_comment_pages", max_comment_pages,
@@ -59,6 +59,7 @@ def scan():
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
+            bufsize=1,
         )
 
         for line in proc.stdout:
