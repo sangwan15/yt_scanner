@@ -17,6 +17,7 @@ if not YOUTUBE_API_KEY:
 # --- Endpoints ---
 YT_SEARCH_URL = "https://www.googleapis.com/youtube/v3/search"
 YT_COMMENTS_URL = "https://www.googleapis.com/youtube/v3/commentThreads"
+YT_VIDEOS_URL = "https://www.googleapis.com/youtube/v3/videos"
 
 
 # --- Prompt for Gemini ---
@@ -32,22 +33,19 @@ log = logging.getLogger("yt_thumbs_gemini")
 SCANWORDS: Dict[str, set[str]] = {
     # English
     "en": {
-        # wildlife terms
-        "pangolin", "ivory", "rhino horn", "tiger skin", "wildlife trade",
         # commerce / contact cues
         "price", "rate", "deal", "for sale", "sell", "selling", "buy", "buying",
         "available", "in stock", "stock",
         "call me", "call", "contact", "phone", "number",
-        "dm", "pm", "inbox", "message", "msg",
-        "whatsapp", "whats app", "watsapp", "whtsapp", "wa", "wa no", "whatsapp me",
+        " dm", "pm", "inbox", "message", "msg",
+        "whatsapp", "whats app", "watsapp", "whtsapp", "wa no", "whatsapp me",
         # common misspellings/short forms
         "whatsap", "watsap", "whatsp",
     },
 
     # Hindi
     "hi": {
-        # wildlife terms (add more if you like)
-        "पैंगोलिन", "हाथीदांत", "गैंडे का सींग", "बाघ की खाल", "वन्यजीव व्यापार",
+
         # commerce / contact cues
         "कीमत", "दाम", "रेट", "डील",
         "कॉल करो", "मुझे कॉल करो", "कॉल करें", "कॉल",
@@ -55,33 +53,30 @@ SCANWORDS: Dict[str, set[str]] = {
         "डीएम", "डायरेक्ट मैसेज", "मैसेज", "संदेश", "इनबॉक्स",
         "व्हाट्सएप", "वॉट्सऐप", "व्हाट्सअप",
         # people often use Latin spellings in Hindi comments too:
-        "whatsapp", "watsapp", "wa", "wa no",
+        "whatsapp", "watsapp", "wa no",
     },
 
     # Marathi
     "mr": {
-        # wildlife terms
-        "खवले मांजर", "हत्तीचे दात", "गेंड्याचे शिंग", "वाघाची कातडी", "वन्यजीव व्यापार",
         # commerce / contact cues
         "किंमत", "भाव", "रेट", "डील",
         "कॉल करा", "मला कॉल करा", "कॉल", "फोन", "नंबर", "संपर्क",
         "मेसेज", "संदेश", "डीएम", "डायरेक्ट मेसेज", "इनबॉक्स",
         "व्हॉट्सअ‍ॅप", "वॉट्सॅप",
         # common Latin forms used in MR contexts
-        "whatsapp", "watsapp", "wa", "wa no",
+        "whatsapp", "watsapp", "wa no",
     },
 
     # Telugu
     "te": {
-        # wildlife terms
-        "ప్యాంగోలిన్", "దంతం", "ఖడ్గమృగం కొమ్ము", "పులి చర్మం", "అడవి జంతు వాణిజ్యం",
+
         # commerce / contact cues
         "ధర", "రేటు", "డీల్",
         "కాల్ చేయి", "నన్ను కాల్ చేయి", "కాల్చేయి", "ఫోన్", "నెంబర్",
         "డీఎం", "మెసేజ్", "సందేశం", "ఇన్‌బాక్స్",
         "వాట్సాప్", "వాట్సాప్ నంబర్",
         # Latin spellings seen in TE comments
-        "whatsapp", "watsapp", "wa", "wa no",
+        "whatsapp", "watsapp", "wa no",
     },
 }
 
@@ -213,6 +208,21 @@ def fetch_comments(video_id: str, max_results: int = 50) -> List[Dict]:
         })
     return comments
 
+def comments_enabled(video_id: str) -> bool:
+    """Return True if comments are enabled for the given video."""
+    params = {
+        "key": YOUTUBE_API_KEY,
+        "part": "statistics",
+        "id": video_id,
+    }
+    data = _get(YT_VIDEOS_URL, params)
+    items = data.get("items", [])
+    if not items:
+        return False
+    stats = items[0].get("statistics", {}) or {}
+    # commentCount may be absent when comments are disabled
+    return "commentCount" in stats
+
 
 def scan_comment(text: str, lang: str) -> Optional[Dict[str, List[str]]]:
     """Return matched words and phone numbers in a comment."""
@@ -326,19 +336,22 @@ def main():
 
         # Fetch and scan comments
         try:
-            comments = fetch_comments(vid, max_results=args.max_comments)
-            for c in comments:
-                scan_res = scan_comment(c["text"], args.language)
-                if scan_res:
-                    comment_hits.append({
-                        "video_id": vid,
-                        "video_title": v["title"],
-                        "comment_id": c["comment_id"],
-                        "author": c["author"],
-                        "text": c["text"],
-                        "matched_words": ",".join(scan_res["words"]),
-                        "phone_numbers": ",".join(scan_res["numbers"]),
-                    })
+            if not comments_enabled(vid):
+                log.info("  -> Comments are disabled; skipping comment scan.")
+            else:
+                comments = fetch_comments(vid, max_results=args.max_comments)
+                for c in comments:
+                    scan_res = scan_comment(c["text"], args.language)
+                    if scan_res:
+                        comment_hits.append({
+                            "video_id": vid,
+                            "video_title": v["title"],
+                            "comment_id": c["comment_id"],
+                            "author": c["author"],
+                            "text": c["text"],
+                            "matched_words": ",".join(scan_res["words"]),
+                            "phone_numbers": ",".join(scan_res["numbers"]),
+                        })
         except Exception as e:
             log.info(f"  ! Error fetching comments: {e}")
 
