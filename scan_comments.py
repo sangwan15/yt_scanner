@@ -106,7 +106,7 @@ def guess_mime(url: str) -> str:
     if p.endswith(".webp"): return "image/webp"
     return "image/jpeg"  # default for i.ytimg.com
 
-def search_videos(keyword: str, n: int = 200) -> List[Dict]:
+def search_videos(keyword: str, n: int = 200, lang: str = "en") -> List[Dict]:
     items: List[Dict] = []
     page_token: Optional[str] = None
     while len(items) < n:
@@ -120,8 +120,10 @@ def search_videos(keyword: str, n: int = 200) -> List[Dict]:
             "order": "date",
             "safeSearch": "none",
             "regionCode": "IN",        # bias results to India (availability/ranking)
-            "relevanceLanguage": "hi", # or "en" or leave out; biases query language
+           
         }
+        if lang:
+            params["relevanceLanguage"] = lang
         if page_token:
             params["pageToken"] = page_token
         data = _get(YT_SEARCH_URL, params)
@@ -252,9 +254,9 @@ def main():
     ap.add_argument("--gemini_api_key", default="AIzaSyA2BwX7quE1Mf0_eA4KmVOFqeq0rd_F5So")
     ap.add_argument(
         "--language",
-        choices=["hi", "en", "mr"],
+        choices=["hi", "en", "mr", "te"],
         default="en",
-        help="Language for comment scanwords (hi=en for Telugu per requirement)",
+        help="Language for comment scanwords",
     )
     ap.add_argument(
         "--max_comments",
@@ -274,7 +276,7 @@ def main():
         raise SystemExit("analyze_thumbnails=true but no GEMINI_API_KEY/GOOGLE_API_KEY provided.")
 
     log.info(f"Searching YouTube for '{args.keyword}' (up to {args.max_results})…")
-    items = search_videos(args.keyword, n=args.max_results)
+    items = search_videos(args.keyword, n=args.max_results, lang=args.language)
     videos = []
     for it in items:
         vid = (it.get("id") or {}).get("videoId")
