@@ -1,77 +1,68 @@
+#!/usr/bin/env python3
 import os
-import re
 import csv
 import time
-import requests
+import base64
 import logging
-from typing import Dict, List, Tuple
+import requests
+from typing import Dict, List, Optional
+from urllib.parse import urlparse
 
+# --- Config / Keys ---
 YOUTUBE_API_KEY = "AIzaSyBG9p3EOvsfvl6K7QMyF9PP4okVl2CNbgE"
+GEMINI_API_KEY = "AIzaSyA2BwX7quE1Mf0_eA4KmVOFqeq0rd_F5So"
+GEMINI_MODEL = "gemini-1.5-pro-latest"
 
-SEARCH_URL = "https://www.googleapis.com/youtube/v3/search"
-COMMENT_THREADS_URL = "https://www.googleapis.com/youtube/v3/commentThreads"
+if not YOUTUBE_API_KEY:
+    raise SystemExit("Please set YOUTUBE_API_KEY")
+if not GEMINI_API_KEY:
+    raise SystemExit("Please set GEMINI_API_KEY or GOOGLE_API_KEY")
 
-# -------- Phone number detection (Indian-friendly; supports arbitrary separators) --------
-PHONE_REGEX = re.compile(
-    r"""
-    (?<!\d)                 # no digit before
-    (?:\+?91\D*)?           # optional +91 with non-digits
-    0?\D*                   # optional leading 0 with separators
-    [6-9](?:\D*\d){9}       # 10 digits total, allowing separators
-    (?!\d)                  # no digit after
-    """,
-    re.VERBOSE
+# --- Endpoints ---
+YT_SEARCH_URL = "https://www.googleapis.com/youtube/v3/search"
+GEMINI_URL = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent"
+
+# --- Prompt for Gemini ---
+PROMPT = (
+    "Identify whether the image contains an animal or an illegally traded wilidlife product. "
+    "Reply strictly just with a yes or no"
 )
 
-def extract_phone_numbers(text: str) -> List[str]:
-    if not text:
-        return []
-    matches = PHONE_REGEX.findall(text)
-    cleaned = []
-    for m in matches:
-        digits = "".join(ch for ch in m if ch.isdigit())
-        if len(digits) >= 10:
-            cleaned.append(digits[-10:])
-    seen, out = set(), []
-    for c in cleaned:
-        if c not in seen:
-            seen.add(c)
-            out.append(c)
-    return out
+# --- Logging ---
+logging.basicConfig(level=logging.INFO, format="%(message)s")
+log = logging.getLogger("yt_thumbs_gemini")
 
-# -------- Keyword/phrase detection --------
-def normalize_kw_list(raw_list: List[str]) -> List[str]:
-    return [k.strip().lower() for k in raw_list if k.strip()]
 
-def find_keywords(text: str, keywords: List[str]) -> List[str]:
-    if not text:
-        return []
-    low = text.lower()
-    seen, hits = set(), []
-    for k in keywords:
-        if k and k in low and k not in seen:
-            seen.add(k)
-            hits.append(k)
-    return hits
-
-# -------- HTTP helper with basic retry/backoff --------
-def _get(url: str, params: Dict, max_retries: int = 5, backoff: float = 1.5) -> Dict:
+# -------------------- Helpers --------------------
+def _get(url: str, params: Dict, max_retries: int = 5, backoff: float = 1.7) -> Dict:
+    """Generic GET with simple exponential backoff."""
     attempt = 0
     while True:
-        resp = requests.get(url, params=params, timeout=30)
-        if resp.status_code == 200:
-            return resp.json()
+        r = requests.get(url, params=params, timeout=30)
+        if r.status_code == 200:
+            return r.json()
         attempt += 1
         if attempt > max_retries:
-            raise RuntimeError(f"GET {url} failed after {max_retries} retries: {resp.status_code} {resp.text}")
+            raise RuntimeError(f"GET {url} failed: {r.status_code} {r.text}")
         time.sleep(backoff ** attempt)
 
-# -------- Search up to n videos --------
+
+def guess_mime(url: str) -> str:
+    p = urlparse(url).path.lower()
+    if p.endswith(".png"):
+        return "image/png"
+    if p.endswith(".webp"):
+        return "image/webp"
+    # YouTube thumbnails are typically JPEG:
+    return "image/jpeg"
+
+
 def search_videos(keyword: str, n: int = 200) -> List[Dict]:
-    results = []
-    page_token = None
-    while len(results) < n:
-        to_fetch = min(50, n - len(results))
+    """Search videos by keyword, newest first, return raw items (with snippet)."""
+    items: List[Dict] = []
+    page_token: Optional[str] = None
+    while len(items) < n:
+        to_fetch = min(50, n - len(items))
         params = {
             "key": YOUTUBE_API_KEY,
             "part": "snippet",
@@ -83,165 +74,159 @@ def search_videos(keyword: str, n: int = 200) -> List[Dict]:
         }
         if page_token:
             params["pageToken"] = page_token
-        data = _get(SEARCH_URL, params)
-        items = data.get("items", [])
-        results.extend(items)
+        data = _get(YT_SEARCH_URL, params)
+        page_items = data.get("items", [])
+        items.extend(page_items)
         page_token = data.get("nextPageToken")
-        if not page_token or not items:
+        if not page_token or not page_items:
             break
-    return results
+    return items
 
-# -------- Fetch comments (skip if disabled) --------
-def fetch_all_comments(video_id: str, max_pages: int = 5) -> Tuple[bool, List[Tuple[str, str]]]:
-    """Return (comments_enabled, comments_list)."""
-    comments: List[Tuple[str, str]] = []
-    page_token = None
-    pages = 0
+
+def pick_thumbnail_url(snippet: Dict, video_id: str) -> Optional[str]:
+    """Choose the best available thumbnail URL from snippet; fall back to i.ytimg.com."""
+    thumbs = (snippet or {}).get("thumbnails", {}) or {}
+    for key in ("maxres", "standard", "high", "medium", "default"):
+        if key in thumbs and "url" in thumbs[key]:
+            return thumbs[key]["url"]
+    # Fallback (not always available at maxres)
+    return f"https://i.ytimg.com/vi/{video_id}/hqdefault.jpg"
+
+
+def fetch_bytes(url: str, max_retries: int = 4, backoff: float = 1.7) -> bytes:
+    attempt = 0
     while True:
-        params = {
-            "key": YOUTUBE_API_KEY,
-            "part": "snippet,replies",
-            "videoId": video_id,
-            "maxResults": 100,
-            "textFormat": "plainText",
-            "order": "time"
-        }
-        if page_token:
-            params["pageToken"] = page_token
-        resp = requests.get(COMMENT_THREADS_URL, params=params, timeout=30)
-        if resp.status_code != 200:
-            err = resp.json().get("error", {})
-            reason = ""
-            try:
-                reason = err.get("errors", [{}])[0].get("reason", "")
-            except Exception:
-                pass
-            if reason == "commentsDisabled":
-                return False, []  # comments disabled
-            raise RuntimeError(f"Error fetching comments for {video_id}: {resp.text}")
-        data = resp.json()
-        for item in data.get("items", []):
-            top = item.get("snippet", {}).get("topLevelComment", {})
-            top_snip = top.get("snippet", {}) if top else {}
-            author = top_snip.get("authorDisplayName", "")
-            text = top_snip.get("textDisplay", "") or top_snip.get("textOriginal", "")
-            if text:
-                comments.append((author, text))
-            for rep in item.get("replies", {}).get("comments", []) or []:
-                rs = rep.get("snippet", {})
-                ra = rs.get("authorDisplayName", "")
-                rt = rs.get("textDisplay", "") or rs.get("textOriginal", "")
-                if rt:
-                    comments.append((ra, rt))
-        page_token = data.get("nextPageToken")
-        pages += 1
-        if not page_token or pages >= max_pages:
-            break
-    return True, comments
+        r = requests.get(url, timeout=30)
+        if r.status_code == 200 and r.content:
+            return r.content
+        attempt += 1
+        if attempt > max_retries:
+            raise RuntimeError(f"GET {url} failed: {r.status_code} {r.text[:200]}")
+        time.sleep(backoff ** attempt)
 
+
+def call_gemini_on_image(image_bytes: bytes, mime_type: str) -> str:
+    """Send image + prompt; return model's raw text response."""
+    payload = {
+        "contents": [{
+            "role": "user",
+            "parts": [
+                {"text": PROMPT},
+                {
+                    "inline_data": {
+                        "mime_type": mime_type,
+                        "data": base64.b64encode(image_bytes).decode("ascii"),
+                    }
+                },
+            ],
+        }]
+    }
+    r = requests.post(
+        GEMINI_URL,
+        params={"key": GEMINI_API_KEY},
+        json=payload,
+        timeout=60,
+    )
+    if r.status_code != 200:
+        raise RuntimeError(f"Gemini error {r.status_code}: {r.text[:500]}")
+    data = r.json()
+    # Typical path: candidates[0].content.parts[0].text
+    try:
+        return data["candidates"][0]["content"]["parts"][0]["text"]
+    except Exception:
+        return ""
+
+
+def normalize_yes_no(s: str) -> str:
+    s = (s or "").strip().lower()
+    # Accept 'yes', 'yes.', 'yes!' etc.; treat anything that starts with 'y' as yes
+    if s.startswith("y"):
+        return "yes"
+    if s.startswith("n"):
+        return "no"
+    # Unknown -> no (be conservative)
+    return "no"
+
+
+# -------------------- Main --------------------
 def main():
     import argparse
-    parser = argparse.ArgumentParser(description="YouTube search → scan COMMENTS for phone numbers + keywords.")
-    parser.add_argument("keyword", help="Keyword to search on YouTube")
-    parser.add_argument("--max_results", type=int, default=200, help="Number of videos to fetch (search pages of 50)")
-    parser.add_argument("--max_comment_pages", type=int, default=5, help="Comment pages per video (100 threads per page)")
-    parser.add_argument("--csv", default="yt_mobile_hits.csv", help="Output CSV filename")
-    parser.add_argument("--log", default="scan_log.txt", help="File to write console output")
-    parser.add_argument(
-        "--keywords",
-        default="whatsapp, contact, call me, for sale, price, deal, DM, inbox, poach, ivory, skin, horn, leopard, tiger",
-        help="Comma-separated keywords/phrases to scan in comments"
+    ap = argparse.ArgumentParser(
+        description="YouTube search → send thumbnails to Gemini 1.5 Pro for yes/no wildlife detection."
     )
-    parser.add_argument("--keywords_file", default=None, help="Optional path to a newline-separated keyword list")
-    args = parser.parse_args()
+    ap.add_argument("keyword", help="YouTube search keyword")
+    ap.add_argument("--max_results", type=int, default=200, help="Max videos to fetch")
+    ap.add_argument("--csv", default="yt_thumbnail_hits.csv", help="Output CSV filename")
+    ap.add_argument("--sleep", type=float, default=0.2, help="Delay between Gemini calls (seconds)")
+    args = ap.parse_args()
 
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(message)s",
-        handlers=[
-            logging.FileHandler(args.log, mode="w", encoding="utf-8"),
-            logging.StreamHandler(),
-        ],
-    )
-    log = logging.getLogger("scan_comments")
+    log.info(f"Searching YouTube for '{args.keyword}' (up to {args.max_results})…")
+    items = search_videos(args.keyword, n=args.max_results)
+    videos = []
+    for it in items:
+        vid = (it.get("id") or {}).get("videoId")
+        sn = it.get("snippet") or {}
+        if not vid:
+            continue
+        videos.append({
+            "video_id": vid,
+            "title": sn.get("title", ""),
+            "channel_title": sn.get("channelTitle", ""),
+            "published_at": sn.get("publishedAt", ""),
+            "thumbnail_url": pick_thumbnail_url(sn, vid),
+        })
 
+    log.info(f"Found {len(videos)} videos. Sending thumbnails to Gemini…")
 
-    if not YOUTUBE_API_KEY or YOUTUBE_API_KEY == "YOUR_API_KEY_HERE":
-        raise SystemExit("Please set YOUTUBE_API_KEY env var or paste your key in the script.")
-
-    # Compose keyword list
-    kw_list = normalize_kw_list(args.keywords.split(","))
-    if args.keywords_file:
-        with open(args.keywords_file, "r", encoding="utf-8") as f:
-            kw_list.extend(normalize_kw_list(f.readlines()))
-        kw_list = list(dict.fromkeys(kw_list))  # dedupe
-
-    log.info(f"Searching YouTube for '{args.keyword}' (up to {args.max_results} videos)...")
-    search_items = search_videos(args.keyword, n=args.max_results)
-
-    video_meta = []
-    for it in search_items:
-        vid = it.get("id", {}).get("videoId")
-        sn = it.get("snippet", {}) or {}
-        if vid:
-            video_meta.append({
-                "video_id": vid,
-                "title": sn.get("title", ""),
-                "channel_title": sn.get("channelTitle", "")
-            })
-
-    log.info(f"Found {len(video_meta)} video IDs. Scanning comments only...")
-
-    hits = []
-    for idx, vm in enumerate(video_meta, 1):
-        vid = vm["video_id"]
-        title = vm["title"]
-        channel_title = vm["channel_title"]
+    results = []
+    for i, v in enumerate(videos, 1):
+        vid = v["video_id"]
         url = f"https://www.youtube.com/watch?v={vid}"
-        log.info(f"[{idx}/{len(video_meta)}] {title} — {url}")
+        thumb_url = v["thumbnail_url"]
 
-        try:
-            enabled, comments = fetch_all_comments(vid, max_pages=args.max_comment_pages)
-            if not enabled:
-                log.info("  -> Comments disabled. Skipping.")
-                continue
-        except Exception as e:
-             log.info(f"  ! Error fetching comments: {e}")
+        log.info(f"[{i}/{len(videos)}] {v['title']} — {url}")
+        if not thumb_url:
+            log.info("  -> No thumbnail URL; skipping.")
             continue
 
-        any_hit = False
-        for author, text in comments:
-            nums = extract_phone_numbers(text)
-            kws = find_keywords(text, kw_list)
-            if nums or kws:
-                any_hit = True
-                hits.append({
-                    "where": "comment",
-                    "video_id": vid,
-                    "video_title": title,
-                    "channel_title": channel_title,
-                    "video_url": url,
-                    "author_or_field": author,
-                    "text_snippet": text.replace("\n", " ").strip(),
-                    "matched_numbers": ", ".join(nums),
-                    "matched_keywords": ", ".join(kws)
-                })
-        if any_hit:
-            log.info("  -> Matches found in comments.")
-        else:
-            log.info("  -> No matches in comments.")
+        try:
+            img = fetch_bytes(thumb_url)
+            mime = guess_mime(thumb_url)
+            raw = call_gemini_on_image(img, mime)
+            yn = normalize_yes_no(raw)
+            hit = (yn == "yes")
+            log.info(f"  -> Gemini: {raw!r}  => hit={hit}")
+        except Exception as e:
+            log.info(f"  ! Error: {e}")
+            raw = ""
+            yn = "no"
+            hit = False
+
+        results.append({
+            "video_id": vid,
+            "video_title": v["title"],
+            "channel_title": v["channel_title"],
+            "published_at": v["published_at"],
+            "video_url": url,
+            "thumbnail_url": thumb_url,
+            "gemini_reply": raw,
+            "hit": "yes" if hit else "no",
+        })
+
+        time.sleep(args.sleep)
 
     # Write CSV
     fieldnames = [
-        "where", "video_id", "video_title", "channel_title", "video_url",
-        "author_or_field", "text_snippet", "matched_numbers", "matched_keywords"
+        "video_id", "video_title", "channel_title", "published_at",
+        "video_url", "thumbnail_url", "gemini_reply", "hit"
     ]
     with open(args.csv, "w", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=fieldnames)
-        writer.writeheader()
-        writer.writerows(hits)
+        w = csv.DictWriter(f, fieldnames=fieldnames)
+        w.writeheader()
+        w.writerows(results)
 
-    log.info(f"\nDone. {len(hits)} hit(s) saved to {args.csv}")
+    log.info(f"\nDone. {sum(r['hit']=='yes' for r in results)} hit(s) saved to {args.csv}")
+
 
 if __name__ == "__main__":
     main()
