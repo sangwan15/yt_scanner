@@ -92,7 +92,7 @@ form.addEventListener('submit', async (e) => {
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = 'yt_scan_results.csv';
+        a.download = 'yt_scan_results.zip';
         document.body.appendChild(a);
         a.click();
         a.remove();
