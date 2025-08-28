@@ -41,17 +41,25 @@
                        class="w-full rounded-lg border border-slate-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500" />
             </div>
 
+           <div>
+                <label class="block text-sm font-medium mb-1">Language</label>
+                <select name="language" class="w-full rounded-lg border border-slate-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                    <option value="en">English</option>
+                    <option value="hi">Hindi</option>
+                    <option value="mr">Marathi</option>
+                    <option value="te">Telugu</option>
+                </select>
+            </div>
+
             <button type="submit"
                     class="inline-flex items-center justify-center rounded-lg bg-indigo-600 px-4 py-2.5 text-white font-semibold
                        hover:bg-indigo-700 transition-colors">
                 Scan & Download CSV
             </button>
 
-            <div id="progress-container" class="hidden">
-                <div class="w-full bg-slate-200 rounded-full h-4">
-                    <div id="progress-bar" class="bg-indigo-600 h-4 rounded-full" style="width:0%"></div>
-                </div>
-                <p id="progress-text" class="text-xs mt-1">0%</p>
+           <div id="log-container" class="hidden">
+                <label class="block text-sm font-medium mb-1">Logs</label>
+                <pre id="log-window" class="w-full h-48 bg-black text-green-200 overflow-y-scroll rounded-lg p-2 text-xs"></pre>
             </div>
 
 
@@ -63,29 +71,25 @@
 </main>
     <script>
 const form = document.getElementById('scan-form');
-const progressContainer = document.getElementById('progress-container');
-const progressBar = document.getElementById('progress-bar');
-const progressText = document.getElementById('progress-text');
-let progressInterval;
+const logContainer = document.getElementById('log-container');
+const logWindow = document.getElementById('log-window');
+let logInterval;
 
 form.addEventListener('submit', async (e) => {
     e.preventDefault();
     const fd = new FormData(form);
-    progressContainer.classList.remove('hidden');
-    progressBar.style.width = '0%';
-    progressText.textContent = '0%';
+    logContainer.classList.remove('hidden');
+    logWindow.textContent = '';
 
-    progressInterval = setInterval(async () => {
-        const r = await fetch('/progress');
+    logInterval = setInterval(async () => {
+        const r = await fetch('/logs');
         const data = await r.json();
-        progressBar.style.width = data.percent + '%';
-        progressText.textContent = data.percent + '%';
+        logWindow.textContent = data.lines.join('');
+        logWindow.scrollTop = logWindow.scrollHeight;
     }, 1000);
 
     const resp = await fetch('/scan', { method: 'POST', body: fd });
-    clearInterval(progressInterval);
-    progressBar.style.width = '100%';
-    progressText.textContent = '100%';
+    clearInterval(logInterval);
 
     if (resp.ok) {
         const blob = await resp.blob();
