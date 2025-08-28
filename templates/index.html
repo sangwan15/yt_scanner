@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>YouTube Comment Scanner (Demo)</title>
+    <!-- Tailwind CDN (fine for a quick local demo) -->
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-slate-50 text-slate-800">
+<main class="mx-auto max-w-xl p-6">
+    <div class="bg-white rounded-2xl shadow-sm p-6">
+        <h1 class="text-2xl font-bold mb-4">YouTube Comment Scanner</h1>
+        <p class="text-sm text-slate-600 mb-6">
+            Enter a keyword and how many videos to scan. On submit, the server runs the Python script and returns a CSV.
+        </p>
+
+        <form action="/scan" method="POST" class="grid gap-4">
+            <div>
+                <label class="block text-sm font-medium mb-1">Keyword</label>
+                <input name="keyword" required placeholder="e.g., wildlife trade"
+                       class="w-full rounded-lg border border-slate-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+            </div>
+
+            <div class="grid grid-cols-2 gap-4">
+                <div>
+                    <label class="block text-sm font-medium mb-1">Max Videos</label>
+                    <input name="max_results" type="number" min="1" max="200" value="20"
+                           class="w-full rounded-lg border border-slate-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+                </div>
+                <div>
+                    <label class="block text-sm font-medium mb-1">Comment Pages/Video</label>
+                    <input name="max_comment_pages" type="number" min="1" max="5" value="2"
+                           class="w-full rounded-lg border border-slate-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+                </div>
+            </div>
+
+            <div>
+                <label class="block text-sm font-medium mb-1">Extra Keywords (comma-separated)</label>
+                <input name="keywords" value="whatsapp, contact, call me, price, for sale, ivory, horn"
+                       class="w-full rounded-lg border border-slate-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+            </div>
+
+            <button type="submit"
+                    class="inline-flex items-center justify-center rounded-lg bg-indigo-600 px-4 py-2.5 text-white font-semibold
+                       hover:bg-indigo-700 transition-colors">
+                Scan & Download CSV
+            </button>
+
+            <p class="text-xs text-slate-500">
+                Tip: Keep it small for a demo (e.g., 10–30 videos). Requires <code>YOUTUBE_API_KEY</code> in the server environment.
+            </p>
+        </form>
+    </div>
+</main>
+</body>
+</html>
