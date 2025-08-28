@@ -3,6 +3,7 @@ import re
 import csv
 import time
 import requests
+import logging
 from typing import Dict, List, Tuple
 
 YOUTUBE_API_KEY = "AIzaSyBG9p3EOvsfvl6K7QMyF9PP4okVl2CNbgE"
@@ -145,6 +146,7 @@ def main():
     parser.add_argument("--max_results", type=int, default=200, help="Number of videos to fetch (search pages of 50)")
     parser.add_argument("--max_comment_pages", type=int, default=5, help="Comment pages per video (100 threads per page)")
     parser.add_argument("--csv", default="yt_mobile_hits.csv", help="Output CSV filename")
+    parser.add_argument("--log", default="scan_log.txt", help="File to write console output")
     parser.add_argument(
         "--keywords",
         default="whatsapp, contact, call me, for sale, price, deal, DM, inbox, poach, ivory, skin, horn, leopard, tiger",
@@ -152,6 +154,17 @@ def main():
     )
     parser.add_argument("--keywords_file", default=None, help="Optional path to a newline-separated keyword list")
     args = parser.parse_args()
+
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(message)s",
+        handlers=[
+            logging.FileHandler(args.log, mode="w", encoding="utf-8"),
+            logging.StreamHandler(),
+        ],
+    )
+    log = logging.getLogger("scan_comments")
+
 
     if not YOUTUBE_API_KEY or YOUTUBE_API_KEY == "YOUR_API_KEY_HERE":
         raise SystemExit("Please set YOUTUBE_API_KEY env var or paste your key in the script.")
@@ -163,7 +176,7 @@ def main():
             kw_list.extend(normalize_kw_list(f.readlines()))
         kw_list = list(dict.fromkeys(kw_list))  # dedupe
 
-    print(f"Searching YouTube for '{args.keyword}' (up to {args.max_results} videos)...")
+    log.info(f"Searching YouTube for '{args.keyword}' (up to {args.max_results} videos)...")
     search_items = search_videos(args.keyword, n=args.max_results)
 
     video_meta = []
@@ -177,7 +190,7 @@ def main():
                 "channel_title": sn.get("channelTitle", "")
             })
 
-    print(f"Found {len(video_meta)} video IDs. Scanning comments only...")
+    log.info(f"Found {len(video_meta)} video IDs. Scanning comments only...")
 
     hits = []
     for idx, vm in enumerate(video_meta, 1):
@@ -185,15 +198,15 @@ def main():
         title = vm["title"]
         channel_title = vm["channel_title"]
         url = f"https://www.youtube.com/watch?v={vid}"
-        print(f"[{idx}/{len(video_meta)}] {title} — {url}")
+        log.info(f"[{idx}/{len(video_meta)}] {title} — {url}")
 
         try:
             enabled, comments = fetch_all_comments(vid, max_pages=args.max_comment_pages)
             if not enabled:
-                print("  -> Comments disabled. Skipping.")
+                log.info("  -> Comments disabled. Skipping.")
                 continue
         except Exception as e:
-            print(f"  ! Error fetching comments: {e}")
+             log.info(f"  ! Error fetching comments: {e}")
             continue
 
         any_hit = False
