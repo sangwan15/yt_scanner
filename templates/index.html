@@ -15,7 +15,7 @@
             Enter a keyword and how many videos to scan. On submit, the server runs the Python script and returns a CSV.
         </p>
 
-       <form id="scan-form" class="grid gap-4">
+        <form id="scan-form" class="grid gap-4">
             <div>
                 <label class="block text-sm font-medium mb-1">Keyword</label>
                 <input name="keyword" required placeholder="e.g., wildlife trade"
@@ -29,19 +29,15 @@
                            class="w-full rounded-lg border border-slate-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500" />
                 </div>
                 <div>
-                    <label class="block text-sm font-medium mb-1">Comment Pages/Video</label>
-                    <input name="max_comment_pages" type="number" min="1" max="5" value="2"
+                    <label class="block text-sm font-medium mb-1">Max Comments/Video</label>
+                    <input name="max_comments" type="number" min="1" max="200" value="50"
                            class="w-full rounded-lg border border-slate-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500" />
                 </div>
             </div>
 
-            <div>
-                <label class="block text-sm font-medium mb-1">Extra Keywords (comma-separated)</label>
-                <input name="keywords" value="whatsapp, contact, call me, price, for sale, ivory, horn"
-                       class="w-full rounded-lg border border-slate-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500" />
-            </div>
 
-           <div>
+
+            <div>
                 <label class="block text-sm font-medium mb-1">Language</label>
                 <select name="language" class="w-full rounded-lg border border-slate-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500">
                     <option value="en">English</option>
@@ -57,7 +53,7 @@
                 Scan & Download CSV
             </button>
 
-           <div id="log-container" class="hidden">
+            <div id="log-container" class="hidden">
                 <label class="block text-sm font-medium mb-1">Logs</label>
                 <pre id="log-window" class="w-full h-48 bg-black text-green-200 overflow-y-scroll rounded-lg p-2 text-xs"></pre>
             </div>
@@ -69,7 +65,7 @@
         </form>
     </div>
 </main>
-    <script>
+<script>
 const form = document.getElementById('scan-form');
 const logContainer = document.getElementById('log-container');
 const logWindow = document.getElementById('log-window');
@@ -96,7 +92,7 @@ form.addEventListener('submit', async (e) => {
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = 'yt_scan_results.zip';
+        a.download = 'yt_comment_hits.csv';
         document.body.appendChild(a);
         a.click();
         a.remove();
