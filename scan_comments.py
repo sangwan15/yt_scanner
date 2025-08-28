@@ -29,7 +29,7 @@ logging.basicConfig(level=logging.INFO, format="%(message)s")
 log = logging.getLogger("yt_thumbs_gemini")
 
 
-SCANWORDS: Dict[str, Set[str]] = {
+SCANWORDS: Dict[str, set[str]] = {
     # English
     "en": {
         # wildlife terms
