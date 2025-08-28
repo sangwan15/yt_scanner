@@ -2,6 +2,7 @@ import os
 import tempfile
 import re
 import subprocess
+import zipfile
 from flask import Flask, render_template, request, send_file, abort
 
 app = Flask(__name__)
@@ -33,9 +34,11 @@ def scan():
     if not keyword:
         abort(400, "keyword is required")
 
-    # Create a temp CSV file path for the script to write
-    fd, csv_path = tempfile.mkstemp(prefix="yt_", suffix=".csv")
-    os.close(fd)
+   # Create temp file paths for the script to write
+    fd_csv, csv_path = tempfile.mkstemp(prefix="yt_", suffix=".csv")
+    os.close(fd_csv)
+    fd_log, log_path = tempfile.mkstemp(prefix="yt_", suffix=".log")
+    os.close(fd_log)
 
     cmd = [
         "python", "scan_comments.py",
@@ -43,6 +46,7 @@ def scan():
         "--max_results", max_results,
         "--max_comment_pages", max_comment_pages,
         "--csv", csv_path,
+        "--log", log_path,
         "--keywords", keywords,
     ]
 
@@ -75,25 +79,32 @@ def scan():
                 os.remove(csv_path)
             abort(500, f"Scanner error:\n{err}")
     except subprocess.TimeoutExpired:
-    proc.kill()
+        proc.kill()
         abort(504, "Scan timed out. Try fewer results or fewer comment pages.")
     finally:
         scan_progress["percent"] = 100
 
-    # Return the CSV as a download
+    # Package CSV and log into a zip for download
+    fd_zip, zip_path = tempfile.mkstemp(prefix="yt_", suffix=".zip")
+    os.close(fd_zip)
+    with zipfile.ZipFile(zip_path, "w") as zf:
+        zf.write(csv_path, arcname="yt_scan_results.csv")
+        zf.write(log_path, arcname="scan_log.txt")
+        
     try:
         return send_file(
-            csv_path,
-            mimetype="text/csv",
+            zip_path,
+            mimetype="application/zip",
             as_attachment=True,
-            download_name="yt_scan_results.csv"
+           download_name="yt_scan_results.zip"
         )
     finally:
         # Temp file cleanup after response is sent
-        try:
-            os.remove(csv_path)
-        except Exception:
-            pass
+        for p in (csv_path, log_path, zip_path):
+            try:
+                os.remove(p)
+            except Exception:
+                pass
 
 if __name__ == "__main__":
     # Simple dev server
