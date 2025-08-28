@@ -18,8 +18,7 @@ YT_SEARCH_URL = "https://www.googleapis.com/youtube/v3/search"
 
 # --- Prompt for Gemini ---
 PROMPT = (
-    "Identify whether the image contains an animal or an illegally traded wilidlife product. "
-    "Reply strictly just with a yes or no"
+    "Identify whether the image contains an animal or an illegally traded wilidlife product.Reply strictly just with a yes or no"
 )
 
 # --- Logging ---
@@ -57,6 +56,8 @@ def search_videos(keyword: str, n: int = 200) -> List[Dict]:
             "maxResults": to_fetch,
             "order": "date",
             "safeSearch": "none",
+            "regionCode": "IN",        # bias results to India (availability/ranking)
+            "relevanceLanguage": "hi", # or "en" or leave out; biases query language
         }
         if page_token:
             params["pageToken"] = page_token
