@@ -34,13 +34,15 @@ SCANWORDS: Dict[str, set[str]] = {
     # English
     "en": {
         # commerce / contact cues
-        "price", "rate", "deal", "for sale", "sell", "selling", "buy", "buying",
+        "price", " rate", " deal", " for sale", "sell", "selling", "buy", "buying",
         "available", "in stock", "stock",
         "call me", "call", "contact", "phone", "number",
-        " dm", "pm", "inbox", "message", "msg",
+        " dm", " pm", "inbox", "message", "msg",
         "whatsapp", "whats app", "watsapp", "whtsapp", "wa no", "whatsapp me",
         # common misspellings/short forms
         "whatsap", "watsap", "whatsp",
+        #instagram handles 
+        " @",
     },
 
     # Hindi
@@ -54,6 +56,8 @@ SCANWORDS: Dict[str, set[str]] = {
         "व्हाट्सएप", "वॉट्सऐप", "व्हाट्सअप",
         # people often use Latin spellings in Hindi comments too:
         "whatsapp", "watsapp", "wa no",
+        #instagram handles 
+        " @",
     },
 
     # Marathi
@@ -65,6 +69,8 @@ SCANWORDS: Dict[str, set[str]] = {
         "व्हॉट्सअ‍ॅप", "वॉट्सॅप",
         # common Latin forms used in MR contexts
         "whatsapp", "watsapp", "wa no",
+        #instagram handles 
+        " @",
     },
 
     # Telugu
@@ -77,6 +83,8 @@ SCANWORDS: Dict[str, set[str]] = {
         "వాట్సాప్", "వాట్సాప్ నంబర్",
         # Latin spellings seen in TE comments
         "whatsapp", "watsapp", "wa no",
+        #instagram handles 
+        " @",
     },
 }
 
