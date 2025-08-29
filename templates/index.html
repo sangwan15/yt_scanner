@@ -7,7 +7,7 @@
     <!-- Tailwind CDN (fine for a quick local demo) -->
     <script src="https://cdn.tailwindcss.com"></script>
 </head>
-<body class="bg-slate-50 text-slate-800">
+<body class="text-slate-800" style="background-image: url('https://www.google.com/url?sa=i&url=https%3A%2F%2Fwww.istockphoto.com%2Fillustrations%2Fhacker-background&psig=AOvVaw05qHXVThu68-k7d_mbT2k_&ust=1756526752693000&source=images&cd=vfe&opi=89978449&ved=0CBIQjRxqFwoTCKDMnZuSr48DFQAAAAAdAAAAABAE'); background-size: cover;">
 <main class="mx-auto max-w-xl p-6">
     <div class="bg-white rounded-2xl shadow-sm p-6">
         <h1 class="text-2xl font-bold mb-4">YouTube Comment Scanner</h1>
@@ -92,7 +92,13 @@ form.addEventListener('submit', async (e) => {
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = 'yt_comment_hits.csv';
+        let filename = 'yt_comment_hits.csv';
+        const cd = resp.headers.get('Content-Disposition');
+        if (cd) {
+            const match = cd.match(/filename="?([^";]+)"?/);
+            if (match) filename = match[1];
+        }
+        a.download = filename;
         document.body.appendChild(a);
         a.click();
         a.remove();
