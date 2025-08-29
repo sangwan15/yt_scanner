@@ -91,10 +91,10 @@ def scan():
 
     try:
         return send_file(
-            out_path,
+            comment_csv_path,
             mimetype="text/csv",
             as_attachment=True,
-            download_name=os.path.basename(out_path),
+            download_name="yt_comment_hits.csv",
         )
     finally:
         # Temp file cleanup after response is sent
